@@ -1,3 +1,6 @@
 numpy
-torch
+pytorch
 torchvision
+torchaudio
+cudatoolkit
+jupyter
