@@ -16,8 +16,8 @@ conda-env:
 
 conda-install:
 # conda install -n env_pytorch --file requirements.txt -c pytorch
-	conda install pytorch==1.10.2 torchvision torchaudio cudatoolkit=11.3 -c pytorch
-	conda install numpy jupyter
+	conda install -n env_pytorch pytorch==1.10.2 torchvision torchaudio cudatoolkit=11.3 -c pytorch
+	conda install -n env_pytorch numpy jupyter scikit-learn matplotlib
 
 conda-activate:
 	source /cygdrive/c/Users/bansh/anaconda3/etc/profile.d/conda.sh; conda activate env_pytorch
