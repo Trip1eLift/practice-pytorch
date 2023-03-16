@@ -1,6 +1,6 @@
 version: '3.8'
 services:
-  aws_lambda_sam_container:
+  anaconda:
     container_name: anaconda
     build: .
     ports:

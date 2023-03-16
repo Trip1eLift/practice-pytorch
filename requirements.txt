@@ -1,6 +1,6 @@
 numpy
-pytorch
+torch
 torchvision
 torchaudio
-cudatoolkit
-jupyter
+scikit-learn
+matplotlib
