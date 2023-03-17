@@ -12,15 +12,22 @@ cleanse:
 
 conda-env:
 # install conda environment in C:\Users\bansh\anaconda3\envs\env_pytorch
-	conda create -n env_pytorch python=3.9
+	conda create -n pytorch python=3.8
 
 conda-install:
-# conda install -n env_pytorch --file requirements.txt -c pytorch
-	conda install -n env_pytorch pytorch==1.10.2 torchvision torchaudio cudatoolkit=11.3 -c pytorch
-	conda install -n env_pytorch numpy jupyter scikit-learn matplotlib
+# conda install -n pytorch --file requirements.txt -c pytorch
+	conda install -n pytorch pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia
+	conda install -n pytorch matplotlib tensorboard scikit-learn jupyter
+
+# conda-pip-install: conda-activate
+# 	pip install scikit-learn jupyter
+
+tensorboard:
+	tensorboard --logdir=src/runs
+
 
 conda-activate:
-	source /cygdrive/c/Users/bansh/anaconda3/etc/profile.d/conda.sh; conda activate env_pytorch
+	source /cygdrive/c/Users/bansh/anaconda3/etc/profile.d/conda.sh; conda activate pytorch
 
 notebook:
 	jupyter notebook ./src
