@@ -10,15 +10,17 @@ class AddPads(nn.Module):
         super(AddPads, self).__init__()
         self.max_seq_len = max_seq_len
     
-    def forward(self, x, device):
+    def forward(self, x):
         # x can be [batch, seq_len, d_input]
         # e.g. "say hello to world" 1x4
+        _, S = x.size()
+        return F.pad(input=x, pad=(0, self.max_seq_len-S, 0, 0), mode='constant', value=0)
         
-        if x.size()[1] < self.max_seq_len:
-            B, S = x.size()                             # 1x4
-            pads = torch.zeros([B, self.max_seq_len-S], dtype=torch.long).to(device) # 1x(512-4) let a pad be [0]
-            x = torch.cat([x, pads], 1)                 # 1x512
-        return x
+        # if x.size()[1] < self.max_seq_len:
+        #     B, S = x.size()                             # 1x4
+        #     pads = torch.zeros([B, self.max_seq_len-S], dtype=torch.long).to(device) # 1x(512-4) let a pad be [0]
+        #     x = torch.cat([x, pads], 1)                 # 1x512
+        # return x
 
 class EmbedEncode(nn.Module):
     "also multiply the weights by sqrt(d_model) after embedding according to the paper"
@@ -27,7 +29,9 @@ class EmbedEncode(nn.Module):
         self.d_model = d_model
         self.max_seq_len = max_seq_len
         self.embedding = nn.Embedding(d_input, d_model)
+
         self.dropout = nn.Dropout(dropout) if dropout is not None else None
+        self.pe = None
 
     def forward(self, x):
         # 1. Embedding
@@ -35,16 +39,18 @@ class EmbedEncode(nn.Module):
         x = x * math.sqrt(self.d_model)  # 1x512x512
 
         # 2. Position Encoding
-        x = self.pos_encoding(x)         # 1x512x512
+        x = x + self.pos_encoding()      # 1x512x512
         if self.dropout is not None:
             x = self.dropout(x)
 
         return x
     
-    def pos_encoding(self, x):
+    def pos_encoding(self):
         "PE (pos, 2i)   = sin(pos / 10000^(2i/d_model))" # position is word pos in sequence
         "PE (pos, 2i+1) = cos(pos / 10000^(2i/d_model))" # i is index in d_model
-        B, _, _ = x.size() # 1x512x512
+        if self.pe is not None:
+            return self.pe
+
         device = next(self.parameters()).device
         even_i = torch.arange(0, self.d_model, 2).to(device).float()           # 256 (d_model / 2)
         denominator = torch.pow(even_i, (even_i / self.d_model))               # 256 (d_model / 2)
@@ -55,11 +61,11 @@ class EmbedEncode(nn.Module):
 
         stacked = torch.stack([even_PE, odd_PE], dim=-1)                       # 512x256x2 (seq_len x (d_model/2) x 2)
         pe = torch.flatten(stacked, start_dim=-2, end_dim=-1)                  # 512x512 (seq_len x d_model) [[even_0 odd_0 even_1 odd_1...]...]
-        batch_pe = pe.unsqueeze(0).repeat(B, 1, 1)                             # 1x512x512
-        x = x + batch_pe                                                       # 1x512x512
-        return x
+        self.pe = pe
+        return pe
 
 class LayerNorm(nn.Module):
+    "Please improve this"
     def __init__(self, d_model=512, max_seq_len=512, eps=1e-5):
         super(LayerNorm, self).__init__()
         self.eps=eps
@@ -67,23 +73,29 @@ class LayerNorm(nn.Module):
         self.beta =  nn.Parameter(torch.zeros(max_seq_len, d_model))
 
     def forward(self, x):
-        # x: 1x512x512 (d_batch, seq_len, d_model)
-        mean = x.mean(-1).mean(-1)              # 1 (d_batch)
-        device = next(self.parameters()).device
 
-        diff = torch.empty(x.size()).to(device) # 1x512x512
-        for i in range(x.size()[0]):
-            diff[i] = (x[i] - mean[i]) ** 2     # find better solution
+        mean = x.mean(-1, keepdim=True)
+        std = x.std(-1, keepdim=True)
+        # Using std instead of var&sqrt saves a ton of computation
+        return self.gamma * (x - mean) / (std + self.eps) + self.beta 
+
+        # # x: 1x512x512 (d_batch, seq_len, d_model)
+        # mean = x.mean(-1).mean(-1)              # 1 (d_batch)
+        # device = next(self.parameters()).device
+
+        # diff = torch.empty(x.size()).to(device) # 1x512x512
+        # for i in range(x.size()[0]):
+        #     diff[i] = (x[i] - mean[i]) ** 2     # find better solution
         
-        var = diff.mean(-1).mean(-1)            # 1 (d_batch)
-        std = (var + self.eps).sqrt()           # 1 (d_batch)
+        # var = diff.mean(-1).mean(-1)            # 1 (d_batch)
+        # std = (var + self.eps).sqrt()           # 1 (d_batch)
 
-        y = torch.empty(x.size()).to(device)    # 1x512x512
-        for i in range(x.size()[0]):
-            y[i] = (x[i] - mean[i]) / std[i]    # find better solution
+        # y = torch.empty(x.size()).to(device)    # 1x512x512
+        # for i in range(x.size()[0]):
+        #     y[i] = (x[i] - mean[i]) / std[i]    # find better solution
 
-        out = y * self.gamma + self.beta        # 1x512x512 (d_batch, seq_len, d_model)
-        return out
+        # out = y * self.gamma + self.beta        # 1x512x512 (d_batch, seq_len, d_model)
+        # return out
 
 class MultiHeadAttention(nn.Module):
     "take x but linear maps to q k v"
@@ -97,7 +109,9 @@ class MultiHeadAttention(nn.Module):
         self.linearQ  = nn.Linear(d_model, 1*d_model) # 1x512x512 -> 1x512x512
         self.linearKV = nn.Linear(d_model, 2*d_model) # 1x512x512 -> 1x512x1024
         self.linearOut = nn.Linear(d_model, d_model) # do linear mapping at the end
+
         self.dropout = nn.Dropout(dropout) if dropout is not None else None
+        self.mask = None
 
     def forward(self, x, m=None, decoderMask=False):
         B, _, _ =  x.size()                                                     # 1x512x512 (d_batch, seq_len, d_model)
@@ -126,7 +140,7 @@ class MultiHeadAttention(nn.Module):
         # 1x8x512x64 dot (1x8x512x64)^T = 1x8x512x64 dot 1x8x64x512 = 1x8x512x512
 
         if decoderMask:
-            scaled = scaled + self.make_mask(scaled.size())            # 1x8x512x512
+            scaled = scaled + self.make_mask()                         # 1x8x512x512
         
         attention = F.softmax(scaled, dim=-1)                          # 1x8x512x512
 
@@ -136,10 +150,14 @@ class MultiHeadAttention(nn.Module):
         values = torch.matmul(attention, v)                            # 1x8x512x64 ( 1x8x512x512 dot 1x8x512x64 = 1x8x512x64)
         return values, attention
     
-    def make_mask(self, size):
+    def make_mask(self):
+        if self.mask is not None:
+            return self.mask
+        
         device = next(self.parameters()).device
-        mask = torch.full(size, float('-inf')).to(device)              # 1x8x512x512
-        mask = torch.triu(mask, diagonal=1)                            # 1x8x512x512
+        mask = torch.full((self.max_seq_len, self.max_seq_len), float('-inf')).to(device) # 512x512
+        mask = torch.triu(mask, diagonal=1)                                               # 512x512
+        self.mask = mask
         return mask
 
 class FeedForward(nn.Module):
@@ -195,8 +213,7 @@ class GPT(nn.Module):
         # x: 1x4, y: 1x3
         n_batch, _ = x.size()
 
-        device = next(self.parameters()).device
-        x = self.add_pads(x, device) # 1x512
+        x = self.add_pads(x) # 1x512
         x = self.embed_encode(x)     # 1x512x512
         x = self.norm(x)             # 1x512x512
         for decoder in self.decoders:
@@ -207,7 +224,7 @@ class GPT(nn.Module):
         if y is None:
             loss = None
         else:
-            y = self.add_pads(y, device) # 1x512
+            y = self.add_pads(y) # 1x512
             x = x.reshape(n_batch * self.max_seq_len, self.d_input)
             y = y.reshape(n_batch * self.max_seq_len)
             loss = F.cross_entropy(x, y)

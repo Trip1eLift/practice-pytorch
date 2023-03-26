@@ -23,7 +23,7 @@ conda-install:
 # 	pip install scikit-learn jupyter
 
 tensorboard:
-	tensorboard --logdir=transformer/runs
+	tensorboard --logdir=gpt/runs
 
 
 conda-activate:
